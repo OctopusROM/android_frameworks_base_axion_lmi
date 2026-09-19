@@ -100,7 +100,8 @@ class UdfpsAnimationInteractor @Inject constructor(
             R.dimen.udfps_animation_offset
         ) * params.scaleFactor
 
-        val offsetY = params.sensorBounds.top - (animationSize / 2) + animationOffset.toInt()
+        val offsetY =
+            params.sensorBounds.centerY() - (animationSize / 2) + animationOffset.toInt()
 
         _uiState.update {
             it.copy(
