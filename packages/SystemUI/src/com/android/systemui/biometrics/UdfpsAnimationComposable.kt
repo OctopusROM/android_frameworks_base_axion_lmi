@@ -43,6 +43,14 @@ fun UdfpsAnimation(
 ) {
     val context = LocalContext.current
     val animType = context.resources.getString(R.string.config_udfps_animation_type)
+    val composition =
+        if (animType == "drawable") {
+            null
+        } else {
+            rememberLottieComposition(
+                LottieCompositionSpec.RawRes(R.raw.nt_udfps_lockscreen_fp_scanning)
+            ).value
+        }
 
     val animationSizeDp = with(LocalDensity.current) {
         state.animationSize.toDp()
@@ -74,10 +82,6 @@ fun UdfpsAnimation(
                     contentScale = ContentScale.Fit
                 )
             } else {
-                val compositionResult = rememberLottieComposition(
-                    LottieCompositionSpec.RawRes(R.raw.nt_udfps_lockscreen_fp_scanning)
-                )
-                val composition by compositionResult
                 val progress by animateLottieCompositionAsState(
                     composition = composition,
                     iterations = LottieConstants.IterateForever,
