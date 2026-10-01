@@ -1604,6 +1604,7 @@ public final class NotificationPanelViewController implements
         // expandImmediate should be always reset at the end of animation
         mQsController.setExpandImmediate(false);
         mShadeRepository.setCurrentFling(null);
+        AxDragonite.onFlingEnd();
     }
 
     private void stopHeightAnimator() {
@@ -2201,6 +2202,7 @@ public final class NotificationPanelViewController implements
     }
 
     private void onTrackingStarted() {
+        AxDragonite.onShadeExpand();
         endClosing();
         mShadeRepository.setLegacyShadeTracking(true);
         if (mTrackingStartedListener != null) {
@@ -2224,6 +2226,8 @@ public final class NotificationPanelViewController implements
         if (expand) {
             mNotificationStackScrollLayoutController.setOverScrollAmount(0.0f, true /* onTop */,
                     true /* animate */);
+        } else {
+            AxDragonite.onShadeCollapse();
         }
         mNotificationStackScrollLayoutController.onPanelTrackingStopped();
 
@@ -2364,6 +2368,7 @@ public final class NotificationPanelViewController implements
 
     private void onClosingFinished() {
         AxDragonite.onFlingEnd();
+        AxDragonite.onShadeCollapse();
         if (Flags.bouncerUiRevamp()) {
             mWindowRootViewBlurInteractor.setTrackingShadeMotion(false);
         }
@@ -3167,9 +3172,7 @@ public final class NotificationPanelViewController implements
 
     private void fling(float vel, boolean expand, float collapseSpeedUpFactor,
             boolean expandBecauseOfFalsing) {
-        if (!expand) {
-            AxDragonite.onFling();
-        }
+        AxDragonite.onFling();
         float target = expand ? getMaxPanelTransitionDistance() : 0;
         if (!expand) {
             setClosing(true);
@@ -4100,6 +4103,11 @@ public final class NotificationPanelViewController implements
                                 || ((openShadeWithoutHun || mAnimatingOnDown) && hAbs > touchSlop))
                                 && hAbs > Math.abs(x - mInitialExpandX)) {
                             cancelHeightAnimator();
+                            if (mPanelClosedOnDown && mQsController.isOpenQsEvent(event)) {
+                                mQsController.setExpandImmediate(true);
+                                setShowShelfOnly(true);
+                                mQsController.setListening(true);
+                            }
                             startExpandMotion(x, y, true /* startTracking */, mExpandedHeight);
                             mShadeLog.v("NotificationPanelViewController MotionEvent"
                                     + " intercepted: startExpandMotion");
