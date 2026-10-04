@@ -56,16 +56,8 @@ public:
 
 private:
     // The only way to invoke dtor is with unref, when mUsageCount is 0.
-    ~AutoBackendTextureRelease() {
-        if (mConvertedBuffer) {
-            AHardwareBuffer_release(mConvertedBuffer);
-            mConvertedBuffer = nullptr;
-        }
-    }
+    ~AutoBackendTextureRelease() {}
 
-    AHardwareBuffer* mConvertedBuffer = nullptr;
-    AHardwareBuffer* mOriginalBuffer = nullptr;
-    android_dataspace mDataspace = HAL_DATASPACE_UNKNOWN;
     GrBackendTexture mBackendTexture;
     GrAHardwareBufferUtils::DeleteImageProc mDeleteProc;
     GrAHardwareBufferUtils::UpdateImageProc mUpdateProc;
