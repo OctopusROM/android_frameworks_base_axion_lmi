@@ -20,6 +20,9 @@
 <!-- These resources are around just to allow their values to be customized
      for different hardware and product builds. -->
 <resources>
+    <!-- Vendor acquired code that signals a UDFPS press; -1 disables this trigger. -->
+    <integer name="config_udfpsVendorCode">-1</integer>
+
     <!-- Component to be used as the recents implementation.  Must implement the
      RecentsImplementation interface.  This name is in the ComponentName flattened format
      (package/class)  -->

@@ -18,6 +18,7 @@ package com.android.server.biometrics.sensors.fingerprint.aidl;
 
 import static android.hardware.biometrics.BiometricFingerprintConstants.FINGERPRINT_ACQUIRED_START;
 import static android.hardware.biometrics.BiometricFingerprintConstants.FINGERPRINT_ACQUIRED_TOO_FAST;
+import static android.hardware.biometrics.BiometricFingerprintConstants.FINGERPRINT_ACQUIRED_VENDOR;
 import static android.hardware.biometrics.BiometricFingerprintConstants.FINGERPRINT_ERROR_TIMEOUT;
 
 import static com.android.server.biometrics.AuthenticationStatsCollector.ACTION_LAST_ENROLL_TIME_CHANGED;
@@ -379,6 +380,21 @@ public class FingerprintEnrollClientTest {
                 new AuthenticationStoppedInfo.Builder(BiometricSourceType.FINGERPRINT,
                         BiometricRequestConstants.REASON_ENROLL_ENROLLING).build()
         );
+    }
+
+    @Test
+    public void testOnAcquired_forwardsVendorCodeToUdfpsOverlay() throws RemoteException {
+        // GIVEN an active UDFPS enrollment request.
+        when(mSensorProps.isAnyUdfpsType()).thenReturn(true);
+        final FingerprintEnrollClient client = createClient();
+        client.start(mCallback);
+
+        // WHEN the HAL reports a vendor acquisition.
+        client.onAcquired(FINGERPRINT_ACQUIRED_VENDOR, 23);
+
+        // THEN the enrollment path preserves the same overlay interface contract.
+        verify(mUdfpsOverlayController).onAcquired(
+                8 /* sensorId */, FINGERPRINT_ACQUIRED_VENDOR, 23);
     }
 
     @Test

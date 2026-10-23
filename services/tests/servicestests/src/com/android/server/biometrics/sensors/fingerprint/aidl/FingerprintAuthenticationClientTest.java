@@ -19,6 +19,7 @@ package com.android.server.biometrics.sensors.fingerprint.aidl;
 import static android.hardware.biometrics.BiometricConstants.BIOMETRIC_ERROR_CANCELED;
 import static android.hardware.biometrics.BiometricFingerprintConstants.FINGERPRINT_ACQUIRED_START;
 import static android.hardware.biometrics.BiometricFingerprintConstants.FINGERPRINT_ACQUIRED_TOO_FAST;
+import static android.hardware.biometrics.BiometricFingerprintConstants.FINGERPRINT_ACQUIRED_VENDOR;
 import static android.hardware.biometrics.BiometricFingerprintConstants.FINGERPRINT_ERROR_HW_UNAVAILABLE;
 import static android.hardware.biometrics.BiometricFingerprintConstants.FINGERPRINT_ERROR_LOCKOUT_PERMANENT;
 
@@ -461,6 +462,20 @@ public class FingerprintAuthenticationClientTest {
                 new AuthenticationStoppedInfo.Builder(BiometricSourceType.FINGERPRINT,
                         BiometricRequestConstants.REASON_AUTH_BP).build()
         );
+    }
+
+    @Test
+    public void testOnAcquired_forwardsVendorCodeToUdfpsOverlay() throws RemoteException {
+        // GIVEN an active UDFPS authentication request.
+        final FingerprintAuthenticationClient client = createClient();
+        client.start(mCallback);
+
+        // WHEN the HAL reports a Goodix finger press.
+        client.onAcquired(FINGERPRINT_ACQUIRED_VENDOR, 22);
+
+        // THEN SystemUI receives both the acquired type and the vendor code.
+        verify(mUdfpsOverlayController).onAcquired(
+                SENSOR_ID, FINGERPRINT_ACQUIRED_VENDOR, 22);
     }
 
     @Test

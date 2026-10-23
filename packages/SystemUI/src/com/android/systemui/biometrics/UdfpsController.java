@@ -20,6 +20,7 @@ import static android.app.StatusBarManager.SESSION_BIOMETRIC_PROMPT;
 import static android.app.StatusBarManager.SESSION_KEYGUARD;
 import static android.hardware.biometrics.BiometricFingerprintConstants.FINGERPRINT_ACQUIRED_GOOD;
 import static android.hardware.biometrics.BiometricFingerprintConstants.FINGERPRINT_ACQUIRED_START;
+import static android.hardware.biometrics.BiometricFingerprintConstants.FINGERPRINT_ACQUIRED_VENDOR;
 import static android.hardware.biometrics.BiometricRequestConstants.REASON_AUTH_BP;
 import static android.hardware.biometrics.BiometricRequestConstants.REASON_AUTH_KEYGUARD;
 import static android.hardware.biometrics.BiometricRequestConstants.REASON_ENROLL_ENROLLING;
@@ -198,6 +199,7 @@ public class UdfpsController implements DozeReceiver, Dumpable {
     @NonNull private final SelectedUserInteractor mSelectedUserInteractor;
     @NonNull private final MSDLPlayer mMsdlPlayer;
     private final boolean mIgnoreRefreshRate;
+    private final int mUdfpsVendorCode;
     private final KeyguardTransitionInteractor mKeyguardTransitionInteractor;
     @NonNull private final AuthController mAuthController;
 
@@ -354,8 +356,31 @@ public class UdfpsController implements DozeReceiver, Dumpable {
         @Override
         public void onAcquired(
                 int sensorId,
-                @BiometricFingerprintConstants.FingerprintAcquired int acquiredInfo
+                @BiometricFingerprintConstants.FingerprintAcquired int acquiredInfo,
+                int vendorCode
         ) {
+            if (isOptical() && acquiredInfo == FINGERPRINT_ACQUIRED_VENDOR
+                    && mUdfpsVendorCode >= 0 && vendorCode == mUdfpsVendorCode) {
+                mFgExecutor.execute(() -> {
+                    if (sensorId != mSensorProps.sensorId || mOverlay == null
+                            || mOverlay.getRequestReason() != REASON_AUTH_KEYGUARD
+                            || !mKeyguardUpdateMonitor.isFingerprintDetectionRunning()
+                            || mIsAodInterruptActive) {
+                        return;
+                    }
+                    final boolean isDozing = mStatusBarStateController.isDozing() || !mScreenOn;
+                    if ((isScreenOffUnlockEnabled() && isDozing)
+                            || (mKeyguardUpdateMonitor.isDreaming() && mScreenOn)) {
+                        mPowerManager.wakeUp(mSystemClock.uptimeMillis(),
+                                PowerManager.WAKE_REASON_GESTURE, TAG);
+                        final Rect bounds = mOverlayParams.getSensorBounds();
+                        onAodInterrupt(bounds.centerX(), bounds.centerY(), 0, 0);
+                    }
+                });
+                // A press starts capture; it is not a vendor capture-complete message.
+                return;
+            }
+
             if (isUltrasonic()) {
                 if (acquiredInfo == FINGERPRINT_ACQUIRED_START) {
                     mFgExecutor.execute(() -> {
@@ -746,6 +771,8 @@ public class UdfpsController implements DozeReceiver, Dumpable {
         mUserActivityNotifier = userActivityNotifier;
         mIgnoreRefreshRate = mContext.getResources()
                     .getBoolean(R.bool.config_ignoreUdfpsVote);
+        mUdfpsVendorCode = mContext.getResources().getInteger(
+                com.android.systemui.res.R.integer.config_udfpsVendorCode);
         // The fingerprint manager is queried for UDFPS before this class is constructed, so the
         // fingerprint manager should never be null.
         mFingerprintManager = checkNotNull(fingerprintManager);
@@ -1016,8 +1043,9 @@ public class UdfpsController implements DozeReceiver, Dumpable {
                 && Settings.Secure.getIntForUser(
                         mContext.getContentResolver(),
                         Settings.Secure.SCREEN_OFF_UNLOCK_UDFPS_ENABLED,
-                        0,
-                        mContext.getUserId()) != 0;
+                        mContext.getResources().getBoolean(
+                                R.bool.config_screen_off_udfps_default_on) ? 1 : 0,
+                        mSelectedUserInteractor.getSelectedUserId()) != 0;
     }
 
     /**

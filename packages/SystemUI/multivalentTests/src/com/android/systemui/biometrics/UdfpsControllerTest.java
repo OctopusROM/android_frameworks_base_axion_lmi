@@ -16,11 +16,16 @@
 
 package com.android.systemui.biometrics;
 
+import static android.hardware.biometrics.BiometricFingerprintConstants.FINGERPRINT_ACQUIRED_VENDOR;
+
 import static com.android.systemui.SysuiTestCaseExtKt.testKosmos;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyFloat;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -42,6 +47,7 @@ import android.hardware.input.InputManager;
 import android.os.Handler;
 import android.os.PowerManager;
 import android.os.RemoteException;
+import android.provider.Settings;
 import android.testing.TestableLooper.RunWithLooper;
 import android.view.LayoutInflater;
 import android.view.Surface;
@@ -80,6 +86,7 @@ import com.android.systemui.power.data.repository.FakePowerRepository;
 import com.android.systemui.power.domain.interactor.PowerInteractor;
 import com.android.systemui.power.shared.model.WakeSleepReason;
 import com.android.systemui.power.shared.model.WakefulnessState;
+import com.android.systemui.settings.brightness.domain.interactor.BrightnessMirrorShowingInteractor;
 import com.android.systemui.shade.domain.interactor.ShadeInteractor;
 import com.android.systemui.statusbar.VibratorHelper;
 import com.android.systemui.statusbar.phone.ScreenOffAnimationController;
@@ -100,6 +107,7 @@ import dagger.Lazy;
 
 import kotlinx.coroutines.CoroutineScope;
 
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -121,6 +129,7 @@ import javax.inject.Provider;
 public class UdfpsControllerTest extends SysuiTestCase {
     private final Kosmos mKosmos = testKosmos(this);
     private static final long TEST_REQUEST_ID = 70;
+    private String mScreenOffUnlockSetting;
 
     @Rule
     public MockitoRule rule = MockitoJUnit.rule();
@@ -220,6 +229,17 @@ public class UdfpsControllerTest extends SysuiTestCase {
 
     @Before
     public void setUp() {
+        mScreenOffUnlockSetting = Settings.Secure.getStringForUser(mContext.getContentResolver(),
+                Settings.Secure.SCREEN_OFF_UNLOCK_UDFPS_ENABLED, 0);
+        Settings.Secure.putStringForUser(mContext.getContentResolver(),
+                Settings.Secure.SCREEN_OFF_UNLOCK_UDFPS_ENABLED, null, 0);
+        mContext.getOrCreateTestableResources()
+                .addOverride(com.android.internal.R.bool.config_screen_off_udfps_enabled, true);
+        mContext.getOrCreateTestableResources()
+                .addOverride(com.android.internal.R.bool.config_screen_off_udfps_default_on, true);
+        mContext.getOrCreateTestableResources()
+                .addOverride(com.android.systemui.res.R.integer.config_udfpsVendorCode, 22);
+
         mPowerRepository = new FakePowerRepository();
         mPowerInteractor = new PowerInteractor(
                 mPowerRepository,
@@ -310,10 +330,12 @@ public class UdfpsControllerTest extends SysuiTestCase {
                 mPromptUdfpsTouchOverlayViewModel,
                 mUdfpsOverlayInteractor,
                 mPowerInteractor,
+                mock(BrightnessMirrorShowingInteractor.class),
                 mock(CoroutineScope.class),
                 UserActivityNotifierKosmosKt.getUserActivityNotifier(mKosmos),
                 mWakefulnessLifecycle,
-                mock(MSDLPlayer.class)
+                mock(MSDLPlayer.class),
+                mock(AuthController.class)
         );
         verify(mFingerprintManager).setUdfpsOverlayController(mOverlayCaptor.capture());
         mOverlayController = mOverlayCaptor.getValue();
@@ -321,6 +343,116 @@ public class UdfpsControllerTest extends SysuiTestCase {
 
         mUdfpsController.updateOverlayParams(sensorProps, new UdfpsOverlayParams());
         mUdfpsController.setUdfpsDisplayMode(mUdfpsDisplayMode);
+    }
+
+    @After
+    public void restoreScreenOffUnlockSetting() {
+        Settings.Secure.putStringForUser(mContext.getContentResolver(),
+                Settings.Secure.SCREEN_OFF_UNLOCK_UDFPS_ENABLED, mScreenOffUnlockSetting, 0);
+    }
+
+    private void prepareScreenOffOverlay() {
+        final UdfpsControllerOverlay overlay = mock(UdfpsControllerOverlay.class);
+        when(overlay.getRequestId()).thenReturn(TEST_REQUEST_ID);
+        when(overlay.matchesRequestId(TEST_REQUEST_ID)).thenReturn(true);
+        when(overlay.getRequestReason()).thenReturn(
+                BiometricRequestConstants.REASON_AUTH_KEYGUARD);
+        mUdfpsController.mOverlay = overlay;
+        mUdfpsController.mOverlayParams = new UdfpsOverlayParams(
+                new Rect(439, 1655, 641, 1857), new Rect(), 1080, 2400, 1f,
+                Surface.ROTATION_0, FingerprintSensorProperties.TYPE_UDFPS_OPTICAL);
+    }
+
+    @Test
+    public void onAcquired_wakesAndScans_whenScreenOffUnlockDefaultsOn() throws RemoteException {
+        // GIVEN a black screen with an active keyguard request and no saved preference.
+        prepareScreenOffOverlay();
+
+        // WHEN Goodix reports a finger on the sensor.
+        mOverlayController.onAcquired(mOpticalProps.sensorId, FINGERPRINT_ACQUIRED_VENDOR, 22);
+        mFgExecutor.runAllReady();
+
+        // THEN the device wakes and the real AOD path starts a scan at the sensor center.
+        verify(mPowerManager).wakeUp(anyLong(), eq(PowerManager.WAKE_REASON_GESTURE), anyString());
+        verify(mFingerprintManager).onPointerDown(eq(TEST_REQUEST_ID), eq(mOpticalProps.sensorId),
+                anyInt(), eq(540f), eq(1756f), anyFloat(), anyFloat(), anyFloat(),
+                anyLong(), anyLong(), eq(true));
+        verify(mFingerprintManager, never()).onPointerUp(anyLong(), anyInt(), anyInt(),
+                anyFloat(), anyFloat(), anyFloat(), anyFloat(), anyFloat(),
+                anyLong(), anyLong(), anyBoolean());
+    }
+
+    @Test
+    public void onAcquired_doesNotWake_whenScreenOffUnlockDisabled() throws RemoteException {
+        // GIVEN the user explicitly disabled screen-off fingerprint.
+        prepareScreenOffOverlay();
+        Settings.Secure.putIntForUser(mContext.getContentResolver(),
+                Settings.Secure.SCREEN_OFF_UNLOCK_UDFPS_ENABLED, 0, 0);
+
+        // WHEN Goodix reports a finger on the sensor.
+        mOverlayController.onAcquired(mOpticalProps.sensorId, FINGERPRINT_ACQUIRED_VENDOR, 22);
+        mFgExecutor.runAllReady();
+
+        // THEN the saved preference takes precedence over the enabled device default.
+        verify(mPowerManager, never()).wakeUp(anyLong(), anyInt(), anyString());
+    }
+
+    @Test
+    public void onAcquired_doesNotWake_whenDeviceDoesNotSupportScreenOffUnlock()
+            throws RemoteException {
+        // GIVEN screen-off fingerprint is unavailable on this device.
+        prepareScreenOffOverlay();
+        mContext.getOrCreateTestableResources()
+                .addOverride(com.android.internal.R.bool.config_screen_off_udfps_enabled, false);
+
+        // WHEN the matching vendor code arrives.
+        mOverlayController.onAcquired(mOpticalProps.sensorId, FINGERPRINT_ACQUIRED_VENDOR, 22);
+        mFgExecutor.runAllReady();
+
+        // THEN the device remains asleep.
+        verify(mPowerManager, never()).wakeUp(anyLong(), anyInt(), anyString());
+    }
+
+    @Test
+    public void onAcquired_doesNotWake_whenVendorCodeIsNotFingerPress() throws RemoteException {
+        // GIVEN an active screen-off keyguard request.
+        prepareScreenOffOverlay();
+
+        // WHEN Goodix reports waiting for authentication rather than a press.
+        mOverlayController.onAcquired(mOpticalProps.sensorId, FINGERPRINT_ACQUIRED_VENDOR, 21);
+        mFgExecutor.runAllReady();
+
+        // THEN the device remains asleep.
+        verify(mPowerManager, never()).wakeUp(anyLong(), anyInt(), anyString());
+    }
+
+    @Test
+    public void onAcquired_doesNotWake_whenFingerprintDetectionStopped() throws RemoteException {
+        // GIVEN keyguard is no longer listening for fingerprints.
+        prepareScreenOffOverlay();
+        when(mKeyguardUpdateMonitor.isFingerprintDetectionRunning()).thenReturn(false);
+
+        // WHEN a late finger-press event arrives.
+        mOverlayController.onAcquired(mOpticalProps.sensorId, FINGERPRINT_ACQUIRED_VENDOR, 22);
+        mFgExecutor.runAllReady();
+
+        // THEN stale events do not wake the device.
+        verify(mPowerManager, never()).wakeUp(anyLong(), anyInt(), anyString());
+    }
+
+    @Test
+    public void onAcquired_doesNotWake_whenOverlayIsForEnrollment() throws RemoteException {
+        // GIVEN the overlay belongs to enrollment rather than keyguard.
+        prepareScreenOffOverlay();
+        when(mUdfpsController.mOverlay.getRequestReason()).thenReturn(
+                BiometricRequestConstants.REASON_ENROLL_ENROLLING);
+
+        // WHEN a vendor finger-press event arrives.
+        mOverlayController.onAcquired(mOpticalProps.sensorId, FINGERPRINT_ACQUIRED_VENDOR, 22);
+        mFgExecutor.runAllReady();
+
+        // THEN non-keyguard requests cannot wake the device.
+        verify(mPowerManager, never()).wakeUp(anyLong(), anyInt(), anyString());
     }
 
     @Test
