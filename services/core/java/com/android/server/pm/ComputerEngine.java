@@ -760,7 +760,10 @@ public class ComputerEngine implements Computer {
                 if (!blockInstantResolution && !blockNormalResolution) {
                     final ResolveInfo ri = new ResolveInfo();
                     ri.activityInfo = ai;
-                    ri.userHandle = UserHandle.of(userId);
+                    int fixedUserId = AxDualAppsService.get() != null
+                            ? AxDualAppsService.get().fixResolveInfoUserId(ai, userId)
+                            : UserHandle.USER_NULL;
+                    ri.userHandle = UserHandle.of(fixedUserId != UserHandle.USER_NULL ? fixedUserId : userId);
                     list = new ArrayList<>(1);
                     list.add(ri);
                     SaferIntentUtils.enforceIntentFilterMatching(args, list);
@@ -967,7 +970,8 @@ public class ComputerEngine implements Computer {
                             ActivityInfo dualAi = ownerActivities.get(i3).activityInfo;
                             for (int j = result.size() - 1; j >= 0; j--) {
                                 ActivityInfo ownerAi = result.get(j).activityInfo;
-                                if (ownerAi.name.equals(dualAi.name) && ownerAi.packageName.equals(dualAi.packageName)) {
+                                if (ownerAi.name.equals(dualAi.name) && ownerAi.packageName.equals(dualAi.packageName)
+                                        && !AxDualAppsService.get().isDualAppEnabled(ownerAi.packageName)) {
                                     result.set(j, ownerActivities.get(i3));
                                     break;
                                 }
@@ -1840,19 +1844,19 @@ public class ComputerEngine implements Computer {
 
             if ("android".equals(p.getPackageName())) {
                 try {
-                    PlayIntegritySpoofService pifService = PlayIntegritySpoofService.getInstance();
-                    if (pifService.isSpoofSignatureEnabled()) {
-                        String[] callingPackages = getPackagesForUid(callingUid);
-                        boolean isGms = false;
-                        if (callingPackages != null) {
-                            for (String pkg : callingPackages) {
-                                if ("com.google.android.gms".equals(pkg)) {
-                                    isGms = true;
-                                    break;
-                                }
+                    String[] callingPackages = getPackagesForUid(callingUid);
+                    boolean isGms = false;
+                    if (callingPackages != null) {
+                        for (String pkg : callingPackages) {
+                            if ("com.google.android.gms".equals(pkg)) {
+                                isGms = true;
+                                break;
                             }
                         }
-                        if (isGms) {
+                    }
+                    if (isGms) {
+                        PlayIntegritySpoofService pifService = PlayIntegritySpoofService.getInstance();
+                        if (pifService.isSpoofSignatureEnabled()) {
                             Signature pifSignature = new Signature(pifService.getRomSignatureBytes());
                             packageInfo.signatures = new Signature[]{pifSignature};
                             packageInfo.signingInfo = new SigningInfo(
@@ -1864,8 +1868,8 @@ public class ComputerEngine implements Computer {
                                     )
                             );
                             Slog.d(TAG, "PIF: Spoofed ROM signature for 'android' package to GMS");
+                            }
                         }
-                    }
                 } catch (Exception e) {
                     Slog.e(TAG, "PIF: Failed to spoof ROM signature", e);
                 }
@@ -1958,11 +1962,7 @@ public class ComputerEngine implements Computer {
                 if (shouldFilterApplication(ps, filterCallingUid, userId)) {
                     return null;
                 }
-            PackageInfo result = generatePackageInfo(ps, flags, userId);
-            if (result == null && AxDualAppsService.get() != null && userId == AxDualAppsService.DUAL_APPS_USER_ID) {
-                return generatePackageInfo(ps, flags, 0);
-            }
-            return result;
+                return generatePackageInfo(ps, flags, userId);
             }
         }
 
@@ -1986,7 +1986,11 @@ public class ComputerEngine implements Computer {
                 return null;
             }
 
-            return generatePackageInfo(ps, flags, userId);
+            PackageInfo result = generatePackageInfo(ps, flags, userId);
+            if (result == null && AxDualAppsService.get() != null && userId == AxDualAppsService.DUAL_APPS_USER_ID) {
+                return generatePackageInfo(ps, flags, 0);
+            }
+            return result;
         }
         if (!matchFactoryOnly && (flags & (MATCH_KNOWN_PACKAGES | MATCH_ARCHIVED_PACKAGES)) != 0) {
             final PackageStateInternal ps = mSettings.getPackage(packageName);
