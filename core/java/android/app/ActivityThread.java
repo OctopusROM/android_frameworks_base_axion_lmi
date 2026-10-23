@@ -241,6 +241,7 @@ import android.window.WindowProviderService;
 import android.window.WindowTokenClientController;
 
 import com.android.internal.R;
+import com.android.internal.animation.ActivityAnimations;
 import com.android.internal.annotations.GuardedBy;
 import com.android.internal.annotations.VisibleForTesting;
 import com.android.internal.app.IVoiceInteractor;
@@ -8019,16 +8020,25 @@ public final class ActivityThread extends ClientTransactionHandler
             gamePropsService.spoofForPackage(data.appInfo.packageName);
         }
 
-        PlayIntegritySpoofService pifService = PlayIntegritySpoofService.getInstance();
-        if (pifService.shouldSpoof(data.processName)) {
-            pifService.spoofBuildFields(data.processName);
-            if (pifService.isSpoofSignatureEnabled()) {
-                pifService.spoofSignature();
+        if (PlayIntegritySpoofService.isTargetProcess(data.processName)) {
+            PlayIntegritySpoofService pifService = PlayIntegritySpoofService.getInstance();
+            if (pifService.shouldSpoof(data.processName)) {
+                pifService.spoofBuildFields(data.processName);
+                if (pifService.isDroidGuard(data.processName)) {
+                    pifService.spoofProperties();
+                    if (pifService.isSpoofProviderEnabled()) {
+                        pifService.spoofProvider();
+                    }
+                    if (pifService.isSpoofSignatureEnabled()) {
+                        pifService.spoofSignature();
+                    }
+                }
             }
-        }
-
-        if (pifService.shouldSpoofPhotos(data.appInfo.packageName)) {
-            pifService.spoofPhotosProps();
+        } else if (PlayIntegritySpoofService.isPhotosPackage(data.appInfo.packageName)) {
+            PlayIntegritySpoofService pifService = PlayIntegritySpoofService.getInstance();
+            if (pifService.shouldSpoofPhotos(data.appInfo.packageName)) {
+                pifService.spoofPhotosProps();
+            }
         }
 
         // Initialize the default http proxy in this process.
@@ -8199,9 +8209,7 @@ public final class ActivityThread extends ClientTransactionHandler
 
         if (!Process.isIsolated()) {
             try {
-                if (AnimationUtils.sPerfAnimEnabled) {
-                    AnimationUtils.ActivityAnimations.preload();
-                }
+                ActivityAnimations.preload();
             } catch (Exception e) {
                 Slog.e(TAG, "Failed to preload animations", e);
             }

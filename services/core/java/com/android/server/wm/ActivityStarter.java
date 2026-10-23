@@ -141,7 +141,8 @@ import com.android.internal.app.IVoiceInteractor;
 import com.android.internal.protolog.ProtoLog;
 import com.android.internal.util.FrameworkStatsLog;
 import com.android.server.UiThread;
-import com.android.server.axdragonite.AxDragonite;
+import com.android.server.LocalServices;
+import com.android.server.axdragonite.IAxDragonite;
 import com.android.server.am.ActivityManagerService.IntentCreatorToken;
 import com.android.server.am.AppBackgroundManager;
 import com.android.server.am.PendingIntentRecord;
@@ -1995,8 +1996,12 @@ class ActivityStarter {
                 voiceSession, voiceInteractor, balVerdict, realCallingUid);
 
         if (r != null && r.info != null && r.info.applicationInfo != null) {
-            AxDragonite.getInstance().onActivityStart(r.packageName, r.shortComponentName,
-                    r.info.applicationInfo.uid, r.app == null);
+            final int targetPid = (r.app != null) ? r.app.getPid() : -1;
+            final IAxDragonite dragonite = LocalServices.getService(IAxDragonite.class);
+            if (dragonite != null) {
+                dragonite.onActivityStart(r.packageName, r.shortComponentName,
+                        r.info.applicationInfo.uid, r.app == null, targetPid);
+            }
         }
 
         computeLaunchingTaskFlags();

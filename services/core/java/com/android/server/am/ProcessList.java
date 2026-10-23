@@ -16,7 +16,8 @@
 
 package com.android.server.am;
 
-import com.android.server.axdragonite.AxDragonite;
+import com.android.server.axdragonite.AxOomAdjusterHelper;
+import com.android.server.axdragonite.AxProcessInfo;
 
 import static android.app.ActivityManager.PROCESS_CAPABILITY_NONE;
 import static android.app.ActivityManager.PROCESS_STATE_CACHED_ACTIVITY;
@@ -2716,7 +2717,7 @@ public final class ProcessList implements ProcessStateController.ProcessLruUpdat
                         app.processName);
             }
             checkSlow(startTime, "startProcess: returned from zygote!");
-            AxDragonite.getInstance().onProcessForked(startResult.pid, isTopApp);
+            AxOomAdjusterHelper.onProcessForked(startResult.pid, isTopApp, app.processName, app.uid);
             return startResult;
         } finally {
             Trace.traceEnd(Trace.TRACE_TAG_ACTIVITY_MANAGER);
@@ -3010,7 +3011,6 @@ public final class ProcessList implements ProcessStateController.ProcessLruUpdat
         mService.reportUidInfoMessageLocked(TAG, buf.toString(), app.getStartUid());
         synchronized (mProcLock) {
             app.setPid(pid);
-            AxDragonite.getInstance().onProcessStarted(pid, app.info.packageName, app.processName, app.uid);
             app.setUsingWrapper(usingWrapper);
             app.setPendingStart(false);
         }
@@ -3595,9 +3595,6 @@ public final class ProcessList implements ProcessStateController.ProcessLruUpdat
             // newly created process and we don't want to destroy the new one.
             if ((expecting == null) || (old == expecting)) {
                 mProcessNames.remove(name, uid);
-                if (old != null) {
-                    AxDragonite.getInstance().onProcessKilled(old.getPid(), old.info.packageName);
-                }
             }
             if (record != null) {
                 final UidRecord uidRecord = record.getUidRecord();
@@ -4408,6 +4405,42 @@ public final class ProcessList implements ProcessStateController.ProcessLruUpdat
     @GuardedBy({"mService", "mProcLock"})
     ArrayList<ProcessRecord> getLruProcessesLSP() {
         return mLruProcesses;
+    }
+
+    public ArrayList<AxProcessInfo> axGetFrozenProcesses(
+            int minAdj, int excludedAdj, int maxAdj, int freezeCmdAdj) {
+        final ArrayList<AxProcessInfo> list = new ArrayList<>();
+        synchronized (mProcLock) {
+            for (int i = mLruProcesses.size() - 1; i >= 0; i--) {
+                final ProcessRecord r = mLruProcesses.get(i);
+                if (r == null || r.isKilled() || r.getThread() == null) {
+                    continue;
+                }
+                final UidRecord uidRec = r.getUidRecord();
+                if (uidRec != null && uidRec.getCurProcState() <= ActivityManager.PROCESS_STATE_TOP) {
+                    continue;
+                }
+                final int adj = r.getCurAdj();
+                if (r.uid > Process.FIRST_APPLICATION_UID
+                        && adj >= minAdj
+                        && adj != excludedAdj
+                        && adj != freezeCmdAdj
+                        && adj < maxAdj) {
+                    list.add(new AxProcessInfo(r.getPid(), r.uid, r.processName));
+                }
+            }
+        }
+        return list;
+    }
+
+    public int axGetTopAppPid() {
+        final ProcessRecord topApp = mService.getTopApp();
+        return topApp != null ? topApp.getPid() : -1;
+    }
+
+    public String axGetTopAppPackageName() {
+        final ProcessRecord topApp = mService.getTopApp();
+        return topApp != null && topApp.info != null ? topApp.info.packageName : null;
     }
 
     /**
