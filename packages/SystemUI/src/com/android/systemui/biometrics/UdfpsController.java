@@ -371,8 +371,11 @@ public class UdfpsController implements DozeReceiver, Dumpable {
                     final boolean isDozing = mStatusBarStateController.isDozing() || !mScreenOn;
                     if ((isScreenOffUnlockEnabled() && isDozing)
                             || (mKeyguardUpdateMonitor.isDreaming() && mScreenOn)) {
-                        mPowerManager.wakeUp(mSystemClock.uptimeMillis(),
-                                PowerManager.WAKE_REASON_GESTURE, TAG);
+                        // Off-screen capture must wait for authentication to wake the device.
+                        if (!isDozing) {
+                            mPowerManager.wakeUp(mSystemClock.uptimeMillis(),
+                                    PowerManager.WAKE_REASON_GESTURE, TAG);
+                        }
                         final Rect bounds = mOverlayParams.getSensorBounds();
                         onAodInterrupt(bounds.centerX(), bounds.centerY(), 0, 0);
                     }

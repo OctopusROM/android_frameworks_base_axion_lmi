@@ -364,7 +364,8 @@ public class UdfpsControllerTest extends SysuiTestCase {
     }
 
     @Test
-    public void onAcquired_wakesAndScans_whenScreenOffUnlockDefaultsOn() throws RemoteException {
+    public void onAcquired_scansWithoutWaking_whenScreenOffUnlockDefaultsOn()
+            throws RemoteException {
         // GIVEN a black screen with an active keyguard request and no saved preference.
         prepareScreenOffOverlay();
 
@@ -372,14 +373,46 @@ public class UdfpsControllerTest extends SysuiTestCase {
         mOverlayController.onAcquired(mOpticalProps.sensorId, FINGERPRINT_ACQUIRED_VENDOR, 22);
         mFgExecutor.runAllReady();
 
-        // THEN the device wakes and the real AOD path starts a scan at the sensor center.
-        verify(mPowerManager).wakeUp(anyLong(), eq(PowerManager.WAKE_REASON_GESTURE), anyString());
+        // THEN capture starts at the sensor center while the device stays asleep.
+        verify(mPowerManager, never()).wakeUp(anyLong(), anyInt(), anyString());
         verify(mFingerprintManager).onPointerDown(eq(TEST_REQUEST_ID), eq(mOpticalProps.sensorId),
                 anyInt(), eq(540f), eq(1756f), anyFloat(), anyFloat(), anyFloat(),
                 anyLong(), anyLong(), eq(true));
         verify(mFingerprintManager, never()).onPointerUp(anyLong(), anyInt(), anyInt(),
                 anyFloat(), anyFloat(), anyFloat(), anyFloat(), anyFloat(),
                 anyLong(), anyLong(), anyBoolean());
+    }
+
+    @Test
+    public void onAcquired_scansWithoutWaking_whenDozingWithScreenOn() throws RemoteException {
+        prepareScreenOffOverlay();
+        mScreenObserverCaptor.getValue().onScreenTurnedOn();
+        when(mStatusBarStateController.isDozing()).thenReturn(true);
+
+        mOverlayController.onAcquired(mOpticalProps.sensorId, FINGERPRINT_ACQUIRED_VENDOR, 22);
+        mFgExecutor.runAllReady();
+
+        verify(mPowerManager, never()).wakeUp(anyLong(), anyInt(), anyString());
+        verify(mFingerprintManager).onPointerDown(eq(TEST_REQUEST_ID), eq(mOpticalProps.sensorId),
+                anyInt(), eq(540f), eq(1756f), anyFloat(), anyFloat(), anyFloat(),
+                anyLong(), anyLong(), eq(true));
+    }
+
+    @Test
+    public void onAcquired_wakesAndScans_whenDreamingWithScreenOn() throws RemoteException {
+        prepareScreenOffOverlay();
+        Settings.Secure.putIntForUser(mContext.getContentResolver(),
+                Settings.Secure.SCREEN_OFF_UNLOCK_UDFPS_ENABLED, 0, 0);
+        mScreenObserverCaptor.getValue().onScreenTurnedOn();
+        when(mKeyguardUpdateMonitor.isDreaming()).thenReturn(true);
+
+        mOverlayController.onAcquired(mOpticalProps.sensorId, FINGERPRINT_ACQUIRED_VENDOR, 22);
+        mFgExecutor.runAllReady();
+
+        verify(mPowerManager).wakeUp(anyLong(), eq(PowerManager.WAKE_REASON_GESTURE), anyString());
+        verify(mFingerprintManager).onPointerDown(eq(TEST_REQUEST_ID), eq(mOpticalProps.sensorId),
+                anyInt(), eq(540f), eq(1756f), anyFloat(), anyFloat(), anyFloat(),
+                anyLong(), anyLong(), eq(true));
     }
 
     @Test
@@ -395,6 +428,9 @@ public class UdfpsControllerTest extends SysuiTestCase {
 
         // THEN the saved preference takes precedence over the enabled device default.
         verify(mPowerManager, never()).wakeUp(anyLong(), anyInt(), anyString());
+        verify(mFingerprintManager, never()).onPointerDown(anyLong(), anyInt(), anyInt(),
+                anyFloat(), anyFloat(), anyFloat(), anyFloat(), anyFloat(),
+                anyLong(), anyLong(), anyBoolean());
     }
 
     @Test
