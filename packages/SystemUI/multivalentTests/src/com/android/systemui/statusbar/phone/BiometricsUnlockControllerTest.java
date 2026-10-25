@@ -22,6 +22,7 @@ import static android.service.dreams.Flags.FLAG_DREAMS_V2;
 import static com.android.systemui.Flags.FLAG_NEW_DOZING_KEYGUARD_STATES;
 import static com.android.systemui.statusbar.phone.BiometricUnlockController.MODE_NONE;
 import static com.android.systemui.statusbar.phone.BiometricUnlockController.MODE_WAKE_AND_UNLOCK;
+import static com.android.systemui.statusbar.phone.BiometricUnlockController.MODE_WAKE_AND_UNLOCK_PULSING;
 
 import static com.google.common.truth.Truth.assertThat;
 
@@ -31,6 +32,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
@@ -83,6 +85,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
@@ -396,6 +399,47 @@ public class BiometricsUnlockControllerTest extends SysuiTestCase {
 
         verify(mStatusBarKeyguardViewManager).notifyKeyguardAuthenticated(
                 /* strongAuth */ eq(false));
+    }
+
+    @Test
+    @DisableFlags(FLAG_NEW_DOZING_KEYGUARD_STATES)
+    public void screenOffFingerprint_publishesUnlockBeforeWaking() {
+        getContext().getOrCreateTestableResources().addOverride(
+                com.android.internal.R.bool.config_screen_off_udfps_enabled, true);
+        mBiometricUnlockController = createController(false);
+        when(mUpdateMonitor.isDeviceInteractive()).thenReturn(false);
+
+        for (int mode : new int[]{MODE_WAKE_AND_UNLOCK, MODE_WAKE_AND_UNLOCK_PULSING}) {
+            reset(mBiometricUnlockInteractor, mKeyguardViewMediator, mPowerManager);
+            mBiometricUnlockController.startWakeAndUnlock(
+                    mode, BiometricUnlockSource.FINGERPRINT_SENSOR);
+
+            final InOrder order = inOrder(
+                    mBiometricUnlockInteractor, mKeyguardViewMediator, mPowerManager);
+            order.verify(mBiometricUnlockInteractor).setBiometricUnlockState(
+                    mode, BiometricUnlockSource.FINGERPRINT_SENSOR);
+            order.verify(mKeyguardViewMediator).onWakeAndUnlocking(false);
+            order.verify(mPowerManager).wakeUp(anyLong(), anyInt(), anyString());
+        }
+    }
+
+    @Test
+    @DisableFlags(FLAG_NEW_DOZING_KEYGUARD_STATES)
+    public void screenOffFingerprint_withoutFeature_keepsLegacyWakeOrder() {
+        getContext().getOrCreateTestableResources().addOverride(
+                com.android.internal.R.bool.config_screen_off_udfps_enabled, false);
+        mBiometricUnlockController = createController(false);
+        when(mUpdateMonitor.isDeviceInteractive()).thenReturn(false);
+
+        mBiometricUnlockController.startWakeAndUnlock(
+                MODE_WAKE_AND_UNLOCK, BiometricUnlockSource.FINGERPRINT_SENSOR);
+
+        final InOrder order = inOrder(
+                mPowerManager, mBiometricUnlockInteractor, mKeyguardViewMediator);
+        order.verify(mPowerManager).wakeUp(anyLong(), anyInt(), anyString());
+        order.verify(mBiometricUnlockInteractor).setBiometricUnlockState(
+                MODE_WAKE_AND_UNLOCK, BiometricUnlockSource.FINGERPRINT_SENSOR);
+        order.verify(mKeyguardViewMediator).onWakeAndUnlocking(false);
     }
 
     @Test

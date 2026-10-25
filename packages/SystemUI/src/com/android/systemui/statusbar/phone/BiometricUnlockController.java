@@ -194,6 +194,7 @@ public class BiometricUnlockController extends KeyguardUpdateMonitorCallback imp
     private final BiometricUnlockLogger mLogger;
     private final SystemClock mSystemClock;
     private final boolean mOrderUnlockAndWake;
+    private final boolean mScreenOffUdfpsSupported;
     private final Lazy<SelectedUserInteractor> mSelectedUserInteractor;
     private final KeyguardTransitionInteractor mKeyguardTransitionInteractor;
     private long mLastFpFailureUptimeMillis;
@@ -340,6 +341,8 @@ public class BiometricUnlockController extends KeyguardUpdateMonitorCallback imp
         mSystemClock = systemClock;
         mOrderUnlockAndWake = resources.getBoolean(
                 com.android.internal.R.bool.config_orderUnlockAndWake);
+        mScreenOffUdfpsSupported = resources.getBoolean(
+                com.android.internal.R.bool.config_screen_off_udfps_enabled);
         mSelectedUserInteractor = selectedUserInteractor;
         mKeyguardTransitionInteractor = keyguardTransitionInteractor;
         mAmbientDisplayConfiguration = ambientDisplayConfiguration;
@@ -520,6 +523,10 @@ public class BiometricUnlockController extends KeyguardUpdateMonitorCallback imp
         boolean wasDeviceInteractive = mUpdateMonitor.isDeviceInteractive();
         mMode = mode;
         mHasScreenTurnedOnSinceAuthenticating = false;
+        final boolean deferScreenOffUdfpsWake = mScreenOffUdfpsSupported
+                && !wasDeviceInteractive
+                && biometricUnlockSource == BiometricUnlockSource.FINGERPRINT_SENSOR
+                && isWakeAndUnlock();
         if (mMode == MODE_WAKE_AND_UNLOCK_PULSING) {
             // If we are waking the device up while we are pulsing the clock and the
             // notifications would light up first, creating an unpleasant animation.
@@ -545,7 +552,7 @@ public class BiometricUnlockController extends KeyguardUpdateMonitorCallback imp
                 && mPowerManager.isInteractive() && mOrderUnlockAndWake
                 && mOrderUnlockAndWake;
 
-        if (!com.android.systemui.Flags.newDozingKeyguardStates()) {
+        if (!com.android.systemui.Flags.newDozingKeyguardStates() && !deferScreenOffUdfpsWake) {
             if (mMode != MODE_NONE && !wakeInKeyguard) {
                 wakeUp.run();
             }
@@ -593,7 +600,7 @@ public class BiometricUnlockController extends KeyguardUpdateMonitorCallback imp
                 break;
         }
         onModeChanged(mMode, biometricUnlockSource);
-        if (com.android.systemui.Flags.newDozingKeyguardStates()) {
+        if (com.android.systemui.Flags.newDozingKeyguardStates() || deferScreenOffUdfpsWake) {
             // wake up after biometric unlock mode is sent to listeners
             if (mMode != MODE_NONE && !wakeInKeyguard) {
                 wakeUp.run();
