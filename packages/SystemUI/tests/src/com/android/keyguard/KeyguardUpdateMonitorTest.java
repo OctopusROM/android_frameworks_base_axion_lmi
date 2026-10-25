@@ -108,6 +108,7 @@ import android.os.PowerManager;
 import android.os.RemoteException;
 import android.os.UserHandle;
 import android.os.UserManager;
+import android.provider.Settings;
 import android.platform.test.annotations.EnableFlags;
 import android.platform.test.flag.junit.FlagsParameterization;
 import android.service.dreams.IDreamManager;
@@ -1558,6 +1559,83 @@ public class KeyguardUpdateMonitorTest extends SysuiTestCase {
 
         // THEN we should listen for udfps
         assertThat(mKeyguardUpdateMonitor.shouldListenForFingerprint(true)).isEqualTo(true);
+    }
+
+    @Test
+    public void screenOffUdfpsSetting_controlsOnlySupportedNoninteractiveUdfps() {
+        final ContentResolver resolver = mContext.getContentResolver();
+        final String previous = Settings.Secure.getStringForUser(resolver,
+                Settings.Secure.SCREEN_OFF_UNLOCK_UDFPS_ENABLED, mCurrentUserId);
+        try {
+            mContext.getOrCreateTestableResources().addOverride(
+                    com.android.internal.R.bool.config_screen_off_udfps_enabled, true);
+            when(mStrongAuthTracker.hasUserAuthenticatedSinceBoot()).thenReturn(true);
+            mStatusBarStateListener.onStateChanged(StatusBarState.KEYGUARD);
+            Settings.Secure.putIntForUser(resolver,
+                    Settings.Secure.SCREEN_OFF_UNLOCK_UDFPS_ENABLED, 0, mCurrentUserId);
+
+            assertThat(mKeyguardUpdateMonitor.shouldListenForFingerprint(true)).isFalse();
+            assertThat(mKeyguardUpdateMonitor.shouldListenForFingerprint(false)).isTrue();
+
+            mContext.getOrCreateTestableResources().addOverride(
+                    com.android.internal.R.bool.config_screen_off_udfps_enabled, false);
+            assertThat(mKeyguardUpdateMonitor.shouldListenForFingerprint(true)).isTrue();
+            mContext.getOrCreateTestableResources().addOverride(
+                    com.android.internal.R.bool.config_screen_off_udfps_enabled, true);
+
+            Settings.Secure.putIntForUser(resolver,
+                    Settings.Secure.SCREEN_OFF_UNLOCK_UDFPS_ENABLED, 1, mCurrentUserId);
+            assertThat(mKeyguardUpdateMonitor.shouldListenForFingerprint(true)).isTrue();
+
+            Settings.Secure.putStringForUser(resolver,
+                    Settings.Secure.SCREEN_OFF_UNLOCK_UDFPS_ENABLED, null, mCurrentUserId);
+            mContext.getOrCreateTestableResources().addOverride(
+                    com.android.internal.R.bool.config_screen_off_udfps_default_on, false);
+            assertThat(mKeyguardUpdateMonitor.shouldListenForFingerprint(true)).isFalse();
+            mContext.getOrCreateTestableResources().addOverride(
+                    com.android.internal.R.bool.config_screen_off_udfps_default_on, true);
+            assertThat(mKeyguardUpdateMonitor.shouldListenForFingerprint(true)).isTrue();
+
+            Settings.Secure.putIntForUser(resolver,
+                    Settings.Secure.SCREEN_OFF_UNLOCK_UDFPS_ENABLED, 0, mCurrentUserId);
+            mKeyguardUpdateMonitor.dispatchStartedWakingUp(PowerManager.WAKE_REASON_POWER_BUTTON);
+            mTestableLooper.processAllMessages();
+            assertThat(mKeyguardUpdateMonitor.shouldListenForFingerprint(true)).isTrue();
+        } finally {
+            Settings.Secure.putStringForUser(resolver,
+                    Settings.Secure.SCREEN_OFF_UNLOCK_UDFPS_ENABLED, previous, mCurrentUserId);
+        }
+    }
+
+    @Test
+    public void screenOffUdfpsSettingChange_updatesFingerprintListening() {
+        final ArgumentCaptor<ContentObserver> observer =
+                ArgumentCaptor.forClass(ContentObserver.class);
+        final ContentResolver resolver = mContext.getContentResolver();
+        verify(resolver).registerContentObserver(
+                eq(Settings.Secure.getUriFor(Settings.Secure.SCREEN_OFF_UNLOCK_UDFPS_ENABLED)),
+                eq(false), observer.capture(), eq(UserHandle.USER_ALL));
+        final String previous = Settings.Secure.getStringForUser(resolver,
+                Settings.Secure.SCREEN_OFF_UNLOCK_UDFPS_ENABLED, mCurrentUserId);
+        try {
+            mContext.getOrCreateTestableResources().addOverride(
+                    com.android.internal.R.bool.config_screen_off_udfps_enabled, true);
+            Settings.Secure.putIntForUser(resolver,
+                    Settings.Secure.SCREEN_OFF_UNLOCK_UDFPS_ENABLED, 1, mCurrentUserId);
+            when(mStrongAuthTracker.hasUserAuthenticatedSinceBoot()).thenReturn(true);
+            mKeyguardUpdateMonitor.setKeyguardShowing(true, false);
+            mTestableLooper.processAllMessages();
+            assertThat(mKeyguardUpdateMonitor.isFingerprintDetectionRunning()).isTrue();
+
+            Settings.Secure.putIntForUser(resolver,
+                    Settings.Secure.SCREEN_OFF_UNLOCK_UDFPS_ENABLED, 0, mCurrentUserId);
+            observer.getValue().onChange(false);
+
+            assertThat(mKeyguardUpdateMonitor.isFingerprintDetectionRunning()).isFalse();
+        } finally {
+            Settings.Secure.putStringForUser(resolver,
+                    Settings.Secure.SCREEN_OFF_UNLOCK_UDFPS_ENABLED, previous, mCurrentUserId);
+        }
     }
 
     @Test

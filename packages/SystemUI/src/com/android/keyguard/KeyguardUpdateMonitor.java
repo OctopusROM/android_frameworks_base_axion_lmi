@@ -375,6 +375,7 @@ public class KeyguardUpdateMonitor implements TrustManager.TrustListener, CoreSt
             mCallbacks = Lists.newArrayList();
     private ContentObserver mDeviceProvisionedObserver;
     private final ContentObserver mTimeFormatChangeObserver;
+    private final ContentObserver mScreenOffUdfpsObserver;
 
     private boolean mSwitchingUser;
 
@@ -2503,6 +2504,12 @@ public class KeyguardUpdateMonitor implements TrustManager.TrustListener, CoreSt
                                 Settings.System.TIME_12_24)));
             }
         };
+        mScreenOffUdfpsObserver = new ContentObserver(mHandler) {
+            @Override
+            public void onChange(boolean selfChange) {
+                updateFingerprintListeningState(BIOMETRIC_ACTION_UPDATE);
+            }
+        };
     }
 
     private final DreamOverlayCallbackController.Callback mDreamOverlayCallback =
@@ -2665,6 +2672,9 @@ public class KeyguardUpdateMonitor implements TrustManager.TrustListener, CoreSt
         mContext.getContentResolver().registerContentObserver(
                 Settings.System.getUriFor(Settings.System.TIME_12_24),
                 false, mTimeFormatChangeObserver, UserHandle.USER_ALL);
+        mContext.getContentResolver().registerContentObserver(
+                Settings.Secure.getUriFor(Settings.Secure.SCREEN_OFF_UNLOCK_UDFPS_ENABLED),
+                false, mScreenOffUdfpsObserver, UserHandle.USER_ALL);
 
         if (SceneContainerFlag.isEnabled()) {
             mJavaAdapter.get().alwaysCollectFlow(
@@ -3213,10 +3223,15 @@ public class KeyguardUpdateMonitor implements TrustManager.TrustListener, CoreSt
                 || mFingerprintInteractiveToAuthProvider == null
                 || !mFingerprintInteractiveToAuthProvider.isEnabled(user)
                 || (isDeviceInteractive() && !mGoingToSleep);
+        final boolean shouldListenScreenOffUdfps = !isUdfps || mDeviceInteractive
+                || !mContext.getResources().getBoolean(
+                        com.android.internal.R.bool.config_screen_off_udfps_enabled)
+                || isScreenOffUdfpsEnabled(user);
 
         boolean shouldListen = shouldListenKeyguardState && shouldListenUserState
                 && shouldListenBouncerState && shouldListenUdfpsState && !mBiometricPromptShowing
                 && shouldListenSecureLockDeviceState && shouldListenFpsState
+                && shouldListenScreenOffUdfps
                 && (!mGoingToSleep || !isUdfps);
         logListenerModelData(
                 new KeyguardFingerprintListenModel(
@@ -3248,6 +3263,14 @@ public class KeyguardUpdateMonitor implements TrustManager.TrustListener, CoreSt
                     mCommunalShowing));
 
         return shouldListen;
+    }
+
+    private boolean isScreenOffUdfpsEnabled(int userId) {
+        return Settings.Secure.getIntForUser(mContext.getContentResolver(),
+                Settings.Secure.SCREEN_OFF_UNLOCK_UDFPS_ENABLED,
+                mContext.getResources().getBoolean(
+                        com.android.internal.R.bool.config_screen_off_udfps_default_on) ? 1 : 0,
+                userId) != 0;
     }
 
     /**
@@ -4319,6 +4342,7 @@ public class KeyguardUpdateMonitor implements TrustManager.TrustListener, CoreSt
         if (mTimeFormatChangeObserver != null) {
             mContext.getContentResolver().unregisterContentObserver(mTimeFormatChangeObserver);
         }
+        mContext.getContentResolver().unregisterContentObserver(mScreenOffUdfpsObserver);
 
         mUserTracker.removeCallback(mUserChangedCallback);
 
