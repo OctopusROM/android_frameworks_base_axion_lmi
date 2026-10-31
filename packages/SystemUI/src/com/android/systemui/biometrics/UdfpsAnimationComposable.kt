@@ -15,7 +15,6 @@
  */
 package com.android.systemui.biometrics
 
-import android.graphics.drawable.Drawable
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -24,7 +23,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -36,8 +35,6 @@ import com.airbnb.lottie.compose.LottieConstants
 import com.airbnb.lottie.compose.rememberLottieComposition
 import com.airbnb.lottie.compose.animateLottieCompositionAsState
 import com.android.systemui.res.R
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 @Composable
 fun UdfpsAnimation(
@@ -54,14 +51,6 @@ fun UdfpsAnimation(
                 LottieCompositionSpec.RawRes(R.raw.nt_udfps_lockscreen_fp_scanning)
             ).value
         }
-    val drawable by produceState<Drawable?>(null, animType, context) {
-        if (animType == "drawable") {
-            value = withContext(Dispatchers.IO) {
-                context.getDrawable(R.drawable.udfps_animation)
-            }
-        }
-    }
-    val drawablePainter = rememberDrawablePainter(drawable)
 
     val animationSizeDp = with(LocalDensity.current) {
         state.animationSize.toDp()
@@ -77,6 +66,7 @@ fun UdfpsAnimation(
             modifier = Modifier.size(animationSizeDp)
         ) {
             if (animType == "drawable") {
+                val drawable = remember(context) { context.getDrawable(R.drawable.udfps_animation) }
                 androidx.compose.runtime.DisposableEffect(drawable) {
                     val animatable = drawable as? android.graphics.drawable.Animatable
                     animatable?.start()
@@ -84,8 +74,9 @@ fun UdfpsAnimation(
                         animatable?.stop()
                     }
                 }
+                val painter = rememberDrawablePainter(drawable)
                 Image(
-                    painter = drawablePainter,
+                    painter = painter,
                     contentDescription = null,
                     modifier = Modifier.size(animationSizeDp),
                     contentScale = ContentScale.Fit
